@@ -1,0 +1,16 @@
+bpftool map update name data_map key hex 00 00 00 00 value hex 61 61 00 00
+bpftool map update name data_map key hex 01 00 00 00 value hex 62 62 00 00
+bpftool map update name data_map key hex 02 00 00 00 value hex 63 63 00 00 
+bpftool map update name data_map key hex 03 00 00 00 value hex 64 64 00 00 
+bpftool map update name data_map key hex 04 00 00 00 value hex 65 65 00 00
+bpftool map update name data_map key hex 05 00 00 00 value hex 66 66 00 00
+bpftool map update name data_map key hex 06 00 00 00 value hex 67 67 00 00 
+bpftool map update name data_map key hex 07 00 00 00 value hex 68 68 00 00 
+bpftool map update name data_map key hex 08 00 00 00 value hex 69 69 00 00
+bpftool map update name data_map key hex 09 00 00 00 value hex 6a 6a 00 00
+bpftool map update name data_map key hex 0a 00 00 00 value hex 6b 6b 00 00 
+bpftool map update name data_map key hex 0b 00 00 00 value hex 6c 6c 00 00 
+bpftool map update name data_map key hex 0c 00 00 00 value hex 6d 6d 00 00
+bpftool map update name data_map key hex 0d 00 00 00 value hex 6e 6e 00 00
+bpftool map update name data_map key hex 0e 00 00 00 value hex 6f 6f 00 00 
+bpftool map update name data_map key hex 0f 00 00 00 value hex 70 70 00 00 
