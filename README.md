@@ -33,7 +33,7 @@
 # How to test the prototype
 
 0. (in the VM running the xdp program) cd into xdp-bplus
-1. load the eBPF program (let's assume ens3 is the device to wihch we load the xdp program)
+1. load the eBPF program (let's assume ens33 is the device to wihch we load the xdp program)
 ```
 sudo ./bplustree_user -d ens33 -A [--force] 
 ```
