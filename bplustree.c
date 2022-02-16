@@ -13,21 +13,28 @@
 
 //sudo cat /sys/kernel/debug/tracing/trace_pipe
 
-#define bpf_printk(fmt, ...)				\
-	({						\
-	char ____fmt[] = fmt;				\
-	bpf_trace_printk(____fmt, sizeof(____fmt),	\
-	##__VA_ARGS__);					\
-	})
+#define DEBUG 1
 
+#define bpf_printk(fmt, ...)				\
+		({						\
+		char ____fmt[] = fmt;				\
+		bpf_trace_printk(____fmt, sizeof(____fmt),	\
+		##__VA_ARGS__);					\
+		})
+	
+#ifdef DEBUG
+#define BPF_DEBUG(str, ...) bpf_printk(str, ##__VA_ARGS__)
+#else
+#define BPF_DEBUG(str, ...) do { } while(0)
+#endif
 
 #define NODE_ORDER 8 			//must be hardcoded
 #define MAX_TREE_HEIGHT 8 		//must be hardcoded
 #define INDEX_MAP_SIZE 65536		//must be hardcoded
 
 struct bplus_tree_info {
-	__u32 curr_root;		//initialized to 0
-	__u32 curr_h;			//initialized to 0
+	__u32 curr_root;		//initialized to 1
+	__u32 curr_h;			//initialized to 1
 	__u32 free_indexes_tail;	//initialized to INDEX_MAP_SIZE -1
 	__u32 is_full;			//initialized to 0
 };
@@ -65,15 +72,16 @@ struct bpf_map_def SEC("maps") free_index_list = {
 	.max_entries = INDEX_MAP_SIZE,
 };
 
-#define OP_SEARCH 1
-#define OP_INSERT 2
-#define OP_DELETE 3
+#define OP_SEARCH 0x00000001
+#define OP_INSERT 0x00000002
+#define OP_DELETE 0x00000003
 
 struct payload {
+	__u32 cmd;
 	__u32 key;
 };
 
-static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
+static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 	__u32 zero = 0;
 	struct bplus_tree_info *info = NULL;
 	struct bplus_tree_info updated_info = {};
@@ -86,7 +94,7 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 
 	info = bpf_map_lookup_elem(&tree_info, &zero);
 	if (!info) {
-		return XDP_ABORTED;
+		return 0;
 	}
 	
 	__builtin_memcpy(&updated_info, info, sizeof(struct bplus_tree_info));
@@ -94,6 +102,12 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 	//all operations need to first search for the leaf node in which 
 	//we search/insert/delete a key. we always start from the root	
 	node_index = info->curr_root;
+
+	if (node_index == 0) {
+		//it meens we have not initialized the info map yet
+		BPF_DEBUG("the tree is not initialized. doing nothing ...");
+		return 0;
+	}
 	
 	for (i=0; i<MAX_TREE_HEIGHT; i++) {
 		if (i==info->curr_h-1){
@@ -104,16 +118,20 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 		if (node == NULL) {
 			return 0;
 		}
-
+		
+		BPF_DEBUG("searching in node %d", node_index);
 		if (node->entry[NODE_ORDER-1].key == 0) {
 			//node is empty
+			BPF_DEBUG("the node is empty");
 			break;
 		}
 		node_traversed[i] = node_index;
 
-		for (j=0; j<NODE_ORDER-1; j++) {
-			if (is_leaf == 0) {
+		if (is_leaf == 0) {
+			BPF_DEBUG("the node is not a leaf");
+			for (j=0; j<NODE_ORDER-1; j++) {
 				//for now we implement a linear search in the node
+				//TODO binry search ?
 				if (key < node->entry[j].key) {
 					node_index = node->entry[j].pointer;
 					break;
@@ -127,28 +145,35 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 					}
 				}
 			}
-			else {
-				//leaf node
-				if (cmd == OP_SEARCH) {
-					//exact match of the search key in the leaf node
-					for (j=0; j<NODE_ORDER-2; j++) {
-						if (key == node->entry[j].key) {
-							data_pointer = node->entry[j].pointer;
-							break;
-						} 				
-					}	
-				}
+		}
+		else {
+			//leaf node
+			BPF_DEBUG("the node is a leaf");
+			if (cmd == OP_SEARCH) {
+				//exact match of the search key in the leaf node
+				for (j=0; j<NODE_ORDER-2; j++) {
+					if (key == node->entry[j].key) {
+						data_pointer = node->entry[j].pointer;
+						break;
+					} 				
+				}	
 			}
 		}
+		
 
 		if (is_leaf) {
-		       break;
+			BPF_DEBUG("leaf node. breakingthe external loop");
+		        break;
 		}	       
 	}
 
+	BPF_DEBUG("the node related to the key is %d", node_index);
+
 	if (cmd == OP_SEARCH) {
+		BPF_DEBUG("SEARCH cmd received");
 		return data_pointer; 
 	} else if (cmd == OP_INSERT) {
+		BPF_DEBUG("INSERT cmd received");
 		if (data_pointer) {
 			bpf_printk("key already in. doing nothing ...");
 			return data_pointer;
@@ -158,9 +183,11 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 		__u64 free_data_index = 1234;
 		int inserted;
 		if (num_of_keys_in_node == NODE_ORDER - 1) { //the leaf node is full
+			BPF_DEBUG("the node is full: SPLIT!");
 			//TODO split!!
 		} else {
 			//ordered insertion in array
+			BPF_DEBUG("the node is not full: ORDERED INSERTION!");
 			struct bplus_node updated_node = {} ;
 			for (i==0; i<NODE_ORDER-2; i++) {
 				if (i == num_of_keys_in_node) {
@@ -189,13 +216,16 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 					updated_node.entry[i+1].key = node->entry[i].key;
 				}
 			}
+			BPF_DEBUG("insertion: updating node %d", node_index);
 			bpf_map_update_elem(&index_map, &node_index, &updated_node, 0);
 		}
 		return free_data_index;	
 	} else if (cmd == OP_DELETE) {
+		BPF_DEBUG("DELETE cmd received");
 		//index == leaf node index
 		return 0;
 	} else {
+		BPF_DEBUG("unrecognized command. nothing to do ...");
 		return 0;
 	}
 }
@@ -262,8 +292,9 @@ int ingress(struct xdp_md *ctx) {
 				return XDP_DROP;
 			}	
 
+			BPF_DEBUG("received command %d key %d", p->cmd, p->key);
 			//val = __bplus_search(p->key);
-			ret = __bplus_process(OP_INSERT, p->key, NULL, 0);
+			ret = __bplus_process(p->cmd, p->key, NULL, 0);
 		}
 
 		__builtin_memcpy(eth->h_dest, h_source, 6);
@@ -271,9 +302,7 @@ int ingress(struct xdp_md *ctx) {
 		ip->saddr = daddr;
 		ip->daddr = saddr;
 		udp->source = dport;
-		udp->dest = sport;
-
-		
+		udp->dest = sport;		
 		
 		if (!ret) { 
 			__u32 tmp = 0;
