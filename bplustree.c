@@ -21,20 +21,20 @@
 	})
 
 
-#define NODE_ORDER 4 			//must be hardcoded
+#define NODE_ORDER 8 			//must be hardcoded
 #define MAX_TREE_HEIGHT 8 		//must be hardcoded
 #define INDEX_MAP_SIZE 65536		//must be hardcoded
 
 struct bplus_tree_info {
-	int curr_root;			//initialized to 0
-	int curr_h;			//initialized to 0
-	int free_indexes_tail;		//initialized to INDEX_MAP_SIZE -1
-	int is_full;			//initialized to 0
+	__u32 curr_root;		//initialized to 0
+	__u32 curr_h;			//initialized to 0
+	__u32 free_indexes_tail;	//initialized to INDEX_MAP_SIZE -1
+	__u32 is_full;			//initialized to 0
 };
 
 struct bplus_node_entry {
-	__u64 pointer;
-	__u64 key;
+	__u32 pointer;
+	__u32 key;
 };
 
 struct bplus_node {
@@ -45,7 +45,7 @@ struct bplus_node {
 struct bpf_map_def SEC("maps") index_map = {
 	.type = BPF_MAP_TYPE_ARRAY,
 	.key_size = sizeof(__u32),
-	.value_size = sizeof(struct bplus_node),
+	.value_size = sizeof(struct bplus_node_entry)*NODE_ORDER,
 	.max_entries = INDEX_MAP_SIZE,
 };
 
@@ -78,8 +78,8 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 	struct bplus_tree_info *info = NULL;
 	struct bplus_tree_info updated_info = {};
 	struct bplus_node *node = NULL;
-	int node_index = 0;
-	__u64 data_pointer = 0;
+	__u32 node_index = 0;
+	__u32 data_pointer = 0;
 	int is_leaf = 0;
 	int node_traversed[MAX_TREE_HEIGHT] = {0};
 	int i=0, j=0;
@@ -101,11 +101,11 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 		}
     		node = bpf_map_lookup_elem(&index_map, &node_index);
 
-		if (!node) {
+		if (node == NULL) {
 			return 0;
 		}
 
-		if (node->entry[NODE_ORDER].key == 0) {
+		if (node->entry[NODE_ORDER-1].key == 0) {
 			//node is empty
 			break;
 		}
