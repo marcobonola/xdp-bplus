@@ -92,7 +92,7 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 	__builtin_memcpy(&updated_info, info, sizeof(struct bplus_tree_info));
 
 	//all operations need to first search for the leaf node in which 
-	//we search/insert/delet a key. we always start from the root	
+	//we search/insert/delete a key. we always start from the root	
 	node_index = info->curr_root;
 	
 	for (i=0; i<MAX_TREE_HEIGHT; i++) {
@@ -102,7 +102,7 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
     		node = bpf_map_lookup_elem(&index_map, &node_index);
 
 		if (!node) {
-			return XDP_ABORTED;
+			return 0;
 		}
 
 		if (node->entry[NODE_ORDER].key == 0) {
@@ -149,39 +149,54 @@ static inline __u64 __bplus_process(int cmd, __u64 key, __u8 *data, int len) {
 	if (cmd == OP_SEARCH) {
 		return data_pointer; 
 	} else if (cmd == OP_INSERT) {
+		if (data_pointer) {
+			bpf_printk("key already in. doing nothing ...");
+			return data_pointer;
+		}
 		//node == leaf node
 		int num_of_keys_in_node = node->entry[NODE_ORDER -1].key;
 		__u64 free_data_index = 1234;
-		int memsize = 0;
+		int inserted;
 		if (num_of_keys_in_node == NODE_ORDER - 1) { //the leaf node is full
 			//TODO split!!
 		} else {
 			//ordered insertion in array
+			struct bplus_node updated_node = {} ;
 			for (i==0; i<NODE_ORDER-2; i++) {
-
-				if (i == num_of_keys_in_node-1) {//empty entry
-					node->entry[i].key = key;	
+				if (i == num_of_keys_in_node) {
+					if (!inserted) {
+						updated_node.entry[i].key = key;	
+						updated_node.entry[i].pointer = free_data_index;
+					}
 					break;
 				}
 
-				if (key < node->entry[i].key) {
+				if (key > node->entry[i].key) {
+					updated_node.entry[i].key = node->entry[i].key;
+					updated_node.entry[i].pointer = node->entry[i].pointer; 
+				}
+				if ((key < node->entry[i].key)) {
 					//move and set
 					//TODO get free data map idx
 					//TODO insert in data map
-					memsize = sizeof(struct bplus_node_entry)*(num_of_keys_in_node-i);
-					
-					__builtin_memcpy(&(node->entry[i+1]), &(node->entry[i]), memsize);
-					node->entry[i].pointer = free_data_index;
-					node->entry[i].key = key;
+					if (!inserted) {
+						updated_node.entry[i].pointer = free_data_index;
+						updated_node.entry[i].key = key;
+						updated_node.entry[NODE_ORDER-1].key++;
+						inserted = 1;
+					}
+					updated_node.entry[i+1].pointer = node->entry[i].pointer;
+					updated_node.entry[i+1].key = node->entry[i].key;
 				}
 			}
+			bpf_map_update_elem(&index_map, &node_index, &updated_node, 0);
 		}
 		return free_data_index;	
 	} else if (cmd == OP_DELETE) {
 		//index == leaf node index
-		return XDP_ABORTED;
+		return 0;
 	} else {
-		return XDP_ABORTED;
+		return 0;
 	}
 }
 
@@ -248,7 +263,7 @@ int ingress(struct xdp_md *ctx) {
 			}	
 
 			//val = __bplus_search(p->key);
-			ret = __bplus_process(OP_SEARCH, p->key, NULL, 0);
+			ret = __bplus_process(OP_INSERT, p->key, NULL, 0);
 		}
 
 		__builtin_memcpy(eth->h_dest, h_source, 6);
