@@ -185,21 +185,88 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			return 0;
 		}
 		__u64 free_data_index = 1234;
+		int insertion_idx = 0;
 		if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the leaf node is full
-			BPF_DEBUG("the node is full: SPLIT!\n");
+			//TODO i dont need an extra entry. I can use the kast one, it is rewritten anyway...
+			struct bplus_node_entry extra_node_entry = {};
+
+			BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
+			for (i=0; i<NODE_ORDER-1; i++) {
+				if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
+					insertion_idx = i;
+					BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
+					break;
+				}
+			}
+			if(!insertion_idx) {
+				BPF_DEBUG("key %d must be stored outside the node.\n", key);
+				BPF_DEBUG("temporarily storing the current key\n");
+                                extra_node_entry.key = key;
+                                extra_node_entry.pointer = data_pointer;
+			} else {
+				BPF_DEBUG("key %d must be stored inside the node.\n", key);
+				BPF_DEBUG("temporarily storing the last key already in %d\n", node->entry[NODE_ORDER-2].key);
+                                extra_node_entry.key = node->entry[NODE_ORDER-2].key;
+                                extra_node_entry.pointer = node->entry[NODE_ORDER-2].pointer;
+
+				BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
+				for (i=NODE_ORDER-2; i >= 0; i--) {
+					BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
+					node->entry[i+1].key = node->entry[i].key;
+					node->entry[i+1].pointer = node->entry[i].pointer;
+					if (i == insertion_idx) {
+						BPF_DEBUG("insertion index %d reached. break\n", i);
+						break;
+					}
+				}
+			}
+
+			 
+			node->entry[insertion_idx].key = key;
+			node->entry[insertion_idx].pointer = free_data_index;
+
 			__u32 *free_idx = NULL;
+			struct bplus_node * free_node = NULL;
 			//TODO split!!
 			free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
         		if (!free_idx) {
+				BPF_DEBUG("free index error. return\n");
                 		return 0;
         		}
 			BPF_DEBUG("free node index %d\n", *free_idx);
+
+			free_node = bpf_map_lookup_elem(&index_map, free_idx); 
+			if (!free_node) {
+				BPF_DEBUG("free node error. return\n");
+				return 0;
+			}
+
+			__u32 median_idx = NODE_ORDER / 2;
+                        BPF_DEBUG("median node has index %d\n", median_idx);
+
+			BPF_DEBUG("pushing 2nd nod half to the new node	\n");
+			int j=0;
+			for (i=median_idx, j=0; i<NODE_ORDER-1; i++, j++) {
+				BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
+				free_node->entry[j].key = node->entry[i].key;
+				free_node->entry[j].pointer = node->entry[i].pointer;	
+				node->entry[i].key = 0;
+				node->entry[i].pointer=0;
+			}
+
+			BPF_DEBUG("pushing extra key %d to the new node index %d\n", extra_node_entry.key, j);
+			free_node->entry[j].key = extra_node_entry.key;
+			free_node->entry[j].pointer = extra_node_entry.pointer;
+			free_node->entry[NODE_ORDER-1].key = j+1;
+			node->entry[NODE_ORDER-1].key = num_of_keys_in_node - j;
+			node->entry[NODE_ORDER-1].pointer = *free_idx;
+
+
 		} else {
 			//ordered insertion in array
 			BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
 			
 			BPF_DEBUG("finding the index where the new key should be stored\n");
-			int insertion_idx = 0;
 			for (i=0; i<NODE_ORDER; i++) {
 				if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
 					insertion_idx = i;
