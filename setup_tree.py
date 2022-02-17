@@ -39,7 +39,8 @@ if __name__ == "__main__":
     #setup tree info
     curr_root = "01 00 00 00"
     curr_height = "01 00 00 00"
-    free_indexes_tail = "ff fe 00 00"
+    #free_indexes_tail = "ff fe 00 00"
+    free_indexes_tail = "07 00 00 00"
     is_full = "00 00 00 00"
 
     value = " ".join([curr_root, curr_height, free_indexes_tail, is_full])
@@ -48,7 +49,7 @@ if __name__ == "__main__":
 
     print("loading free idx... it may take a long time...")
     free_idx = []
-    for i in reversed(range(1, 1000)):
+    for i in reversed(range(2, 10)):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):
@@ -56,7 +57,7 @@ if __name__ == "__main__":
 
         free_idx.append(stri)
     
-    for i in range(0, 1000-1):
+    for i in range(0, 10-2):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):
