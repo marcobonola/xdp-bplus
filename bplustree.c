@@ -89,7 +89,8 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 	__u32 node_index = 0;
 	__u32 data_pointer = 0;
 	int is_leaf = 0;
-	int node_traversed[MAX_TREE_HEIGHT] = {0};
+	int nodes_traversed[MAX_TREE_HEIGHT] = {0};
+	int nodes_traversed_count = 0;
 	int i=0, j=0;
 
 	info = bpf_map_lookup_elem(&tree_info, &zero);
@@ -125,7 +126,8 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			BPF_DEBUG("the node is empty\n");
 			break;
 		}
-		node_traversed[i] = node_index;
+		nodes_traversed[i] = node_index;
+		nodes_traversed_count++;
 
 		if (is_leaf == 0) {
 			BPF_DEBUG("the node is not a leaf\n");
@@ -241,6 +243,10 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				return 0;
 			}
 
+			__u32 new_node_idx = *free_idx;
+			info->free_indexes_tail--;
+			*free_idx = 0;
+
 			__u32 median_idx = NODE_ORDER / 2;
                         BPF_DEBUG("median node has index %d\n", median_idx);
 
@@ -261,9 +267,44 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			node->entry[NODE_ORDER-1].key = num_of_keys_in_node - j;
 			node->entry[NODE_ORDER-1].pointer = *free_idx;
 
+			
+
+			BPF_DEBUG("adjusting the parent\n");
+			//TODO traverse back the stack on nodes
+
+			nodes_traversed_count --;
+			if (nodes_traversed_count == 0) {
+				BPF_DEBUG("we are in the root node. we need a new root\n");
+			}
+
+			struct bplus_node * new_root_node = NULL;
+
+                   	free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
+                        if (!free_idx) {
+                                BPF_DEBUG("free index error. return\n");
+                                return 0;
+                        }
+                        BPF_DEBUG("free node index %d\n", *free_idx);
+
+                        new_root_node = bpf_map_lookup_elem(&index_map, free_idx);
+                        if (!new_root_node) {
+                                BPF_DEBUG("free node error. return\n");
+                                return 0;
+                        }
+
+                        info->free_indexes_tail--;
+                        *free_idx = 0;
+
+			info->curr_root = *free_idx;
+			info->curr_h++;
+
+			new_root_node->entry[0].key = free_node->entry[0].key; 
+			new_root_node->entry[0].pointer = node_index;  //left child
+			new_root_node->entry[1].pointer = new_node_idx;   //right child
+			new_root_node->entry[NODE_ORDER-1].key = 1;
 
 		} else {
-			//ordered insertion in array
+			//
 			BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
 			
 			BPF_DEBUG("finding the index where the new key should be stored\n");
