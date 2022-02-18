@@ -4,6 +4,7 @@
 import sys
 import subprocess
 import os
+import time
 
 def xdp_load_prog(prog, iface):
     command = [prog, '-d', iface, '-A', '--force']
@@ -29,13 +30,19 @@ if __name__ == "__main__":
 
     iface = sys.argv[1]
     prog = sys.argv[2]
+
+
+    print("cleaning XDP..")
     try:
         xdp_clear_all(iface)
     except:
         pass
             
+    time.sleep(1)
+    print("loading XDP prog ...")
     xdp_load_prog(prog, iface)
 
+    time.sleep(1)
     #setup tree info
     curr_root = "01 00 00 00"
     curr_height = "01 00 00 00"

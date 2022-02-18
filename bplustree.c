@@ -134,15 +134,18 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			for (j=0; j<NODE_ORDER-1; j++) {
 				//for now we implement a linear search in the node
 				//TODO binry search ?
+				BPF_DEBUG("j %d node key %d\n", j, node->entry[j].key);
 				if (key < node->entry[j].key) {
 					node_index = node->entry[j].pointer;
+					BPF_DEBUG("LESS. search key %d, key %d\n, go to node %d\n", key, node->entry[j].key, node_index);
 					break;
 				} else {
 					//(search key == curr key) or
 					if ((key == node->entry[j].key) || 
 					//(search key > curr_key) and (curr key == last key)
-					  ( (j == node->entry[NODE_ORDER-1].key) || (j == NODE_ORDER-2)) ) { 
-						node_index = node->entry[j+1].pointer;
+					  ( (node->entry[j].key == 0) || (j == NODE_ORDER-2)) ) { 
+						node_index = node->entry[j].pointer;
+						BPF_DEBUG("EQUAL or LAST. search key %d, key %d\n, go to node %d\n", key, node->entry[j].key, node_index);
 						break;	
 					}
 				}
@@ -169,6 +172,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		}	       
 	}
 
+	//this is the leaf node in which we search/insert/delete the key
 	BPF_DEBUG("the node related to the key is %d\n", node_index);
 
 	if (cmd == OP_SEARCH) {
@@ -180,7 +184,6 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			bpf_printk("key already in. doing nothing ...\n");
 			return data_pointer;
 		}
-		//node == leaf node
 		int num_of_keys_in_node = node->entry[NODE_ORDER-1].key;
 		if ((num_of_keys_in_node < 0) || (num_of_keys_in_node >= NODE_ORDER)) {
 			BPF_DEBUG("something strange with the key counter in node. aborting....\n");
@@ -189,7 +192,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		__u64 free_data_index = 1234;
 		int insertion_idx = 0;
 		if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the leaf node is full
-			//TODO i dont need an extra entry. I can use the kast one, it is rewritten anyway...
+			//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
 			struct bplus_node_entry extra_node_entry = {};
 
 			BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
@@ -293,9 +296,9 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
                         }
 
                         info->free_indexes_tail--;
+			info->curr_root = *free_idx;
                         *free_idx = 0;
 
-			info->curr_root = *free_idx;
 			info->curr_h++;
 
 			new_root_node->entry[0].key = free_node->entry[0].key; 
