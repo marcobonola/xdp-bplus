@@ -209,7 +209,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		for (kk=0; kk<MAX_TREE_HEIGHT; kk++) {
 			node_index = nodes_traversed[initial_nodes_traversed_count-kk];
 			node = bpf_map_lookup_elem(&index_map, &(node_index));
-			BPF_DEBUG("recursive insertion loop. node_idx %d right_child %d left child %d\n", 
+			BPF_DEBUG("recursive insertion loop. node_idx %d left_child %d right child %d\n", 
 									node_index, left_child, right_child);
 			if (!node) {
 				BPF_DEBUG("error in reading the node in the traversed node stack\n");
@@ -344,11 +344,14 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 						node->entry[insertion_idx].pointer = left_child;
 					}
 
-					if ((right_child) &&  (insertion_idx+1 < NODE_ORDER)) {
-						//node->entry[insertion_idx+1].pointer = right_child;
-					}
-
 					node->entry[NODE_ORDER-1].key ++;
+					
+					if (right_child) {
+						BPF_DEBUG("update right child. num of keys %d, right child %d\n", num_of_keys_in_node, right_child);
+						if (insertion_idx +1 < NODE_ORDER-1) {
+							node->entry[insertion_idx+1].pointer = right_child;
+						}
+					}
 				 } else {	
 
 					BPF_DEBUG("readjusting the node before inserting the new key ...\n");
@@ -372,7 +375,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 						node->entry[insertion_idx].pointer = left_child;
 					}
 					if ((right_child) &&  (insertion_idx+1 < NODE_ORDER)) {
-						//node->entry[insertion_idx+1].pointer = right_child;
+						node->entry[insertion_idx+1].pointer = right_child;
 					}
 					node->entry[NODE_ORDER-1].key ++;		
 				}
