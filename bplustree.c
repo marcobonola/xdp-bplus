@@ -89,7 +89,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 	__u32 node_index = 0;
 	__u32 data_pointer = 0;
 	int is_leaf = 0;
-	int nodes_traversed[MAX_TREE_HEIGHT] = {0};
+	int nodes_traversed[MAX_TREE_HEIGHT+1] = {0};
 	int nodes_traversed_count = 0;
 	int i=0, j=0;
 
@@ -121,14 +121,15 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		}
 		
 		BPF_DEBUG("searching in node %d\n", node_index);
+		BPF_DEBUG("storing node idx %d in stack position %d\n", node_index, i+1);
+		nodes_traversed[i+1] = node_index;
+		nodes_traversed_count++;
+
 		if (node->entry[NODE_ORDER-1].key == 0) {
 			//node is empty
 			BPF_DEBUG("the node is empty\n");
 			break;
 		}
-		nodes_traversed[i] = node_index;
-		nodes_traversed_count++;
-
 		if (is_leaf == 0) {
 			BPF_DEBUG("the node is not a leaf\n");
 			for (j=0; j<NODE_ORDER-1; j++) {
@@ -181,171 +182,236 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		return data_pointer; 
 	} else if (cmd == OP_INSERT) {
 		BPF_DEBUG("INSERT cmd received\n");
+		__u64 free_data_index = 1234;
+		int need_a_new_root = 0;
+		int insertion_idx = 0;
+		__u32 *free_idx = NULL;
+		struct bplus_node * free_node = NULL;
+		__u32 new_node_idx;
+		int num_of_keys_in_node = 0;
+		__u32 left_child=0, right_child=0;
+
 		if (data_pointer) {
 			bpf_printk("key already in. doing nothing ...\n");
 			return data_pointer;
 		}
-		int num_of_keys_in_node = node->entry[NODE_ORDER-1].key;
-		if ((num_of_keys_in_node < 0) || (num_of_keys_in_node >= NODE_ORDER)) {
-			BPF_DEBUG("something strange with the key counter in node. aborting....\n");
-			return 0;
-		}
-		__u64 free_data_index = 1234;
-		int insertion_idx = 0;
-		if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the leaf node is full
-			//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
-			struct bplus_node_entry extra_node_entry = {};
 
-			BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
-			for (i=0; i<NODE_ORDER-1; i++) {
-				if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
-					insertion_idx = i;
-					BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
-					break;
-				}
+		//at the beginning of this loop key is the insert key. at every next iteration
+		//key will be the median node (if any) to be inserted in the parent node.
+		//this loop ends at the first traversed node in the stack. if we still need to split the last
+		//node (i.e. the root) we need a new root node (see at the end of this loop)
+		
+		int initial_nodes_traversed_count = nodes_traversed_count; 
+		int kk;
+
+		BPF_DEBUG("initial nodes traversed count %d\n", initial_nodes_traversed_count);
+
+		for (kk=0; kk<MAX_TREE_HEIGHT; kk++) {
+			node_index = nodes_traversed[initial_nodes_traversed_count-kk];
+			node = bpf_map_lookup_elem(&index_map, &(node_index));
+			BPF_DEBUG("recursive insertion loop. node_idx %d right_child %d left child %d\n", 
+									node_index, left_child, right_child);
+			if (!node) {
+				BPF_DEBUG("error in reading the node in the traversed node stack\n");
+				return 0;
 			}
-			if(!insertion_idx) {
-				BPF_DEBUG("key %d must be stored outside the node.\n", key);
-				BPF_DEBUG("temporarily storing the current key\n");
-                                extra_node_entry.key = key;
-                                extra_node_entry.pointer = data_pointer;
-			} else {
-				BPF_DEBUG("key %d must be stored inside the node.\n", key);
-				BPF_DEBUG("temporarily storing the last key already in %d\n", node->entry[NODE_ORDER-2].key);
-                                extra_node_entry.key = node->entry[NODE_ORDER-2].key;
-                                extra_node_entry.pointer = node->entry[NODE_ORDER-2].pointer;
+			num_of_keys_in_node = node->entry[NODE_ORDER-1].key;
+			if ((num_of_keys_in_node < 0) || (num_of_keys_in_node >= NODE_ORDER)) {
+				BPF_DEBUG("something strange with the key counter in node. aborting....\n");
+				return 0;
+			}
+			if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the leaf node is full
+				//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
+				struct bplus_node_entry extra_node_entry = {};
 
-				BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
-				for (i=NODE_ORDER-2; i >= 0; i--) {
-					BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
-					node->entry[i+1].key = node->entry[i].key;
-					node->entry[i+1].pointer = node->entry[i].pointer;
-					if (i == insertion_idx) {
-						BPF_DEBUG("insertion index %d reached. break\n", i);
+				BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
+				for (i=0; i<NODE_ORDER-1; i++) {
+					if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
+						insertion_idx = i;
+						BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
 						break;
 					}
 				}
-				node->entry[insertion_idx].key = key;
-				node->entry[insertion_idx].pointer = free_data_index;
-			}
- 
+				if(!insertion_idx) {
+					BPF_DEBUG("key %d must be stored outside the node.\n", key);
+					BPF_DEBUG("temporarily storing the current key\n");
+					extra_node_entry.key = key;
+					if (left_child == 0) { 
+						extra_node_entry.pointer = free_data_index;
+					} else {
+						extra_node_entry.pointer = left_child;	
+					}
+				} else {
+					BPF_DEBUG("key %d must be stored inside the node.\n", key);
+					BPF_DEBUG("temporarily storing the last key already in %d\n", node->entry[NODE_ORDER-2].key);
+					extra_node_entry.key = node->entry[NODE_ORDER-2].key;
+					if (right_child==0) {
+						extra_node_entry.pointer = node->entry[NODE_ORDER-2].pointer;
+					} else {
+						extra_node_entry.pointer = right_child;
+					}
 
-			__u32 *free_idx = NULL;
-			struct bplus_node * free_node = NULL;
-			//TODO split!!
+					BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
+					for (i=NODE_ORDER-2; i >= 0; i--) {
+						BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
+						node->entry[i+1].key = node->entry[i].key;
+						node->entry[i+1].pointer = node->entry[i].pointer;
+						if (i == insertion_idx) {
+							BPF_DEBUG("insertion index %d reached. break\n", i);
+							break;
+						}
+					}
+					node->entry[insertion_idx].key = key;
+					if (left_child == 0) {
+						node->entry[insertion_idx].pointer = free_data_index;
+					} else {
+						node->entry[insertion_idx].pointer = left_child;
+					}
+				}
+	 
+
+				//TODO split!!
+				free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
+				if (!free_idx) {
+					BPF_DEBUG("free index error. return\n");
+					return 0;
+				}
+				BPF_DEBUG("free node index %d\n", *free_idx);
+
+				free_node = bpf_map_lookup_elem(&index_map, free_idx); 
+				if (!free_node) {
+					BPF_DEBUG("free node error. return\n");
+					return 0;
+				}
+
+				new_node_idx = *free_idx;
+				info->free_indexes_tail--;
+				*free_idx = 0;
+
+				__u32 median_idx = NODE_ORDER / 2;
+				BPF_DEBUG("median node has index %d\n", median_idx);
+
+				BPF_DEBUG("pushing 2nd nod half to the new node	\n");
+				int j=0;
+				for (i=median_idx, j=0; i<NODE_ORDER-1; i++, j++) {
+					BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
+					free_node->entry[j].key = node->entry[i].key;
+					free_node->entry[j].pointer = node->entry[i].pointer;	
+					node->entry[i].key = 0;
+					node->entry[i].pointer=0;
+				}
+
+				BPF_DEBUG("pushing extra key %d to the new node index %d\n", extra_node_entry.key, j);
+				free_node->entry[j].key = extra_node_entry.key;
+				free_node->entry[j].pointer = extra_node_entry.pointer;
+				free_node->entry[NODE_ORDER-1].key = j+1;
+				node->entry[NODE_ORDER-1].key = num_of_keys_in_node - j;
+				node->entry[NODE_ORDER-1].pointer = *free_idx;
+
+				if ((insertion_idx == 0) && (right_child))  {  
+					//the insert key was temporarily stored outside the node
+					free_node->entry[j+1].pointer = right_child;
+				}
+				nodes_traversed_count --;
+				key = free_node->entry[0].key; //the median that has to be inserted in the parent
+				left_child = node_index;
+				right_child = new_node_idx; 
+
+				if (nodes_traversed_count == 0) {
+					need_a_new_root = 1;
+					break;
+				}
+			} else {
+				//
+				BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
+				
+				BPF_DEBUG("finding the index where the new key should be stored\n");
+				for (i=0; i<NODE_ORDER; i++) {
+					if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
+						insertion_idx = i;
+						BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
+						break;
+					}
+				}
+
+				if (insertion_idx == num_of_keys_in_node) {
+					BPF_DEBUG("there are no other keys to be pushed forward\n");
+					node->entry[insertion_idx].key = key;
+
+					if (left_child == 0) {
+						node->entry[insertion_idx].pointer = free_data_index;
+					} else {
+						node->entry[insertion_idx].pointer = left_child;
+					}
+
+					if ((right_child) &&  (insertion_idx+1 < NODE_ORDER)) {
+						//node->entry[insertion_idx+1].pointer = right_child;
+					}
+
+					node->entry[NODE_ORDER-1].key ++;
+				 } else {	
+
+					BPF_DEBUG("readjusting the node before inserting the new key ...\n");
+					for (i=NODE_ORDER-3; i >= 0; i--) {
+						if (node->entry[i].key == 0) {
+							BPF_DEBUG("entry %d empty\n", i);
+							continue;
+						}
+						node->entry[i+1].key = node->entry[i].key;
+						node->entry[i+1].pointer = node->entry[i].pointer;
+						if (i == insertion_idx) {
+							BPF_DEBUG("insertion index reached %d. break\n", i);
+							break;
+						}
+					} 
+
+					node->entry[insertion_idx].key = key;
+					if (left_child == 0) {
+						node->entry[insertion_idx].pointer = free_data_index;
+					} else {
+						node->entry[insertion_idx].pointer = left_child;
+					}
+					if ((right_child) &&  (insertion_idx+1 < NODE_ORDER)) {
+						//node->entry[insertion_idx+1].pointer = right_child;
+					}
+					node->entry[NODE_ORDER-1].key ++;		
+				}
+				//we have reached a non-full node. break the recursion loop
+				break;
+			}
+		}
+
+		if (need_a_new_root) {
+			BPF_DEBUG("we are in the root node. we need a new root\n");
+			BPF_DEBUG("key %d, left %d right %d\n", key, left_child, right_child);
+
+			struct bplus_node * new_root_node = NULL;
+
 			free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
-        		if (!free_idx) {
+			if (!free_idx) {
 				BPF_DEBUG("free index error. return\n");
-                		return 0;
-        		}
+				return 0;
+			}
 			BPF_DEBUG("free node index %d\n", *free_idx);
 
-			free_node = bpf_map_lookup_elem(&index_map, free_idx); 
-			if (!free_node) {
+			new_root_node = bpf_map_lookup_elem(&index_map, free_idx);
+			if (!new_root_node) {
 				BPF_DEBUG("free node error. return\n");
 				return 0;
 			}
 
-			__u32 new_node_idx = *free_idx;
 			info->free_indexes_tail--;
-			*free_idx = 0;
-
-			__u32 median_idx = NODE_ORDER / 2;
-                        BPF_DEBUG("median node has index %d\n", median_idx);
-
-			BPF_DEBUG("pushing 2nd nod half to the new node	\n");
-			int j=0;
-			for (i=median_idx, j=0; i<NODE_ORDER-1; i++, j++) {
-				BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
-				free_node->entry[j].key = node->entry[i].key;
-				free_node->entry[j].pointer = node->entry[i].pointer;	
-				node->entry[i].key = 0;
-				node->entry[i].pointer=0;
-			}
-
-			BPF_DEBUG("pushing extra key %d to the new node index %d\n", extra_node_entry.key, j);
-			free_node->entry[j].key = extra_node_entry.key;
-			free_node->entry[j].pointer = extra_node_entry.pointer;
-			free_node->entry[NODE_ORDER-1].key = j+1;
-			node->entry[NODE_ORDER-1].key = num_of_keys_in_node - j;
-			node->entry[NODE_ORDER-1].pointer = *free_idx;
-
-			
-
-			BPF_DEBUG("adjusting the parent\n");
-			//TODO traverse back the stack on nodes
-
-			nodes_traversed_count --;
-			if (nodes_traversed_count == 0) {
-				BPF_DEBUG("we are in the root node. we need a new root\n");
-			}
-
-			struct bplus_node * new_root_node = NULL;
-
-                   	free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
-                        if (!free_idx) {
-                                BPF_DEBUG("free index error. return\n");
-                                return 0;
-                        }
-                        BPF_DEBUG("free node index %d\n", *free_idx);
-
-                        new_root_node = bpf_map_lookup_elem(&index_map, free_idx);
-                        if (!new_root_node) {
-                                BPF_DEBUG("free node error. return\n");
-                                return 0;
-                        }
-
-                        info->free_indexes_tail--;
 			info->curr_root = *free_idx;
-                        *free_idx = 0;
+			*free_idx = 0;
 
 			info->curr_h++;
 
-			new_root_node->entry[0].key = free_node->entry[0].key; 
-			new_root_node->entry[0].pointer = node_index;  //left child
-			new_root_node->entry[1].pointer = new_node_idx;   //right child
+			new_root_node->entry[0].key = key; 
+			new_root_node->entry[0].pointer = left_child;  //left child
+			new_root_node->entry[1].pointer = right_child;   //right child
 			new_root_node->entry[NODE_ORDER-1].key = 1;
-
-		} else {
-			//
-			BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
-			
-			BPF_DEBUG("finding the index where the new key should be stored\n");
-			for (i=0; i<NODE_ORDER; i++) {
-				if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
-					insertion_idx = i;
-					BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
-					break;
-				}
-			}
-
-			if (insertion_idx == num_of_keys_in_node) {
-				BPF_DEBUG("there are no other keys to be pushed forward\n");
-				node->entry[insertion_idx].key = key;
-				node->entry[insertion_idx].pointer = free_data_index;
-				node->entry[NODE_ORDER-1].key ++;
-			 } else {	
-
-				BPF_DEBUG("readjusting the node before inserting the new key ...\n");
-				for (i=NODE_ORDER-3; i >= 0; i--) {
-					if (node->entry[i].key == 0) {
-						BPF_DEBUG("entry %d empty\n", i);
-						continue;
-					}
-					node->entry[i+1].key = node->entry[i].key;
-					node->entry[i+1].pointer = node->entry[i].pointer;
-					if (i == insertion_idx) {
-						BPF_DEBUG("insertion index reached %d. break\n", i);
-						break;
-					}
-				} 
-
-				node->entry[insertion_idx].key = key;
-				node->entry[insertion_idx].pointer = free_data_index;
-				node->entry[NODE_ORDER-1].key ++;
-			
-			}
 		}
+
 		return free_data_index;	
 	} else if (cmd == OP_DELETE) {
 		BPF_DEBUG("DELETE cmd received\n");
