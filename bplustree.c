@@ -137,7 +137,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("j %d node key %d\n", j, node->entry[j].key);
 				if (key < node->entry[j].key) {
 					node_index = node->entry[j].pointer;
-					BPF_DEBUG("LESS. search key %d, key %d\n, go to node %d\n", key, node->entry[j].key, node_index);
+					BPF_DEBUG("LESS. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
 					break;
 				} else {
 					//(search key == curr key) or
@@ -145,7 +145,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					//(search key > curr_key) and (curr key == last key)
 					  ( (node->entry[j].key == 0) || (j == NODE_ORDER-2)) ) { 
 						node_index = node->entry[j].pointer;
-						BPF_DEBUG("EQUAL or LAST. search key %d, key %d\n, go to node %d\n", key, node->entry[j].key, node_index);
+						BPF_DEBUG("EQUAL or LAST. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
 						break;	
 					}
 				}
@@ -172,7 +172,8 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		}	       
 	}
 
-	//this is the leaf node in which we search/insert/delete the key
+	//"node" is the leaf node in which we search/insert/delete the key
+	//if data_pointer != 0 it means we actually found the key. 
 	BPF_DEBUG("the node related to the key is %d\n", node_index);
 
 	if (cmd == OP_SEARCH) {
@@ -224,11 +225,10 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 						break;
 					}
 				}
+				node->entry[insertion_idx].key = key;
+				node->entry[insertion_idx].pointer = free_data_index;
 			}
-
-			 
-			node->entry[insertion_idx].key = key;
-			node->entry[insertion_idx].pointer = free_data_index;
+ 
 
 			__u32 *free_idx = NULL;
 			struct bplus_node * free_node = NULL;
