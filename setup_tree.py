@@ -43,20 +43,10 @@ if __name__ == "__main__":
     xdp_load_prog(prog, iface)
 
     time.sleep(1)
-    #setup tree info
-    curr_root = "01 00 00 00"
-    curr_height = "01 00 00 00"
-    #free_indexes_tail = "ff fe 00 00"
-    free_indexes_tail = "07 00 00 00"
-    is_full = "00 00 00 00"
-
-    value = " ".join([curr_root, curr_height, free_indexes_tail, is_full])
-    key = "00 00 00 00"
-    xdp_raw_map_update("tree_info", key, value)
-
+    
     print("loading free idx... it may take a long time...")
     free_idx = []
-    for i in reversed(range(2, 10)):
+    for i in reversed(range(2, 20)):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):
@@ -64,7 +54,7 @@ if __name__ == "__main__":
 
         free_idx.append(stri)
     
-    for i in range(0, 10-2):
+    for i in range(0, 20-2):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):
@@ -72,6 +62,17 @@ if __name__ == "__main__":
    
         #print(stri, free_idx[i])
         xdp_raw_map_update("free_index_list", stri, free_idx[i])
+
+    #setup tree info
+    curr_root = "01 00 00 00"
+    curr_height = "01 00 00 00"
+    #free_indexes_tail = "ff fe 00 00"
+    free_indexes_tail = stri
+    is_full = "00 00 00 00"
+
+    value = " ".join([curr_root, curr_height, free_indexes_tail, is_full])
+    key = "00 00 00 00"
+    xdp_raw_map_update("tree_info", key, value)
 
     exit()
 

@@ -30,7 +30,7 @@
 
 #define NODE_ORDER 4 			//must be hardcoded
 #define MAX_TREE_HEIGHT 8 		//must be hardcoded
-#define INDEX_MAP_SIZE 16		//must be hardcoded
+#define INDEX_MAP_SIZE 32		//must be hardcoded
 
 struct bplus_tree_info {
 	__u32 curr_root;		//initialized to 1
@@ -284,6 +284,11 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				}
 				BPF_DEBUG("free node index %d\n", *free_idx);
 
+				if (*free_idx == 0xffffffff) {
+					BPF_DEBUG("no more free indexes. abort\n");
+					return 0;
+				}
+
 				free_node = bpf_map_lookup_elem(&index_map, free_idx); 
 				if (!free_node) {
 					BPF_DEBUG("free node error. return\n");
@@ -419,7 +424,12 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("free index error. return\n");
 				return 0;
 			}
+
 			BPF_DEBUG("free node index %d\n", *free_idx);
+			if (*free_idx == 0xffffffff) {
+				BPF_DEBUG("no more free indexes. abort\n");
+				return 0;
+			}
 
 			new_root_node = bpf_map_lookup_elem(&index_map, free_idx);
 			if (!new_root_node) {
