@@ -28,7 +28,7 @@
 #define BPF_DEBUG(str, ...) do { } while(0)
 #endif
 
-#define NODE_ORDER 8 			//must be hardcoded
+#define NODE_ORDER 4 			//must be hardcoded
 #define MAX_TREE_HEIGHT 8 		//must be hardcoded
 #define INDEX_MAP_SIZE 16		//must be hardcoded
 
@@ -144,12 +144,16 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					//(search key == curr key) or
 					if ((key == node->entry[j].key) || 
 					//(search key > curr_key) and (curr key == last key)
-					  ( (node->entry[j].key == 0) || (j == NODE_ORDER-2)) ) { 
+					  ( (node->entry[j].key == 0))) { 
 						node_index = node->entry[j].pointer;
-						BPF_DEBUG("EQUAL or LAST. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
+						BPF_DEBUG("EQUAL or EMPTY RECORD. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
 						break;	
 					}
 				}
+			}
+			if (j==NODE_ORDER-1) {
+				BPF_DEBUG("LAST RECORD. take the last pointer: node_index %d\n", node_index);	
+				node_index = node->entry[NODE_ORDER-1].pointer;
 			}
 		}
 		else {
@@ -220,7 +224,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("something strange with the key counter in node. aborting....\n");
 				return 0;
 			}
-			if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the leaf node is full
+			if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the node is full
 				//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
 				struct bplus_node_entry extra_node_entry = {};
 
@@ -271,6 +275,8 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 	 
 
 				//TODO split!!
+				//if the node to split is a leaf we simply divide the node in two, push second half in the new node, push median upward
+				//if the node is not a leaf the median is not pushed in the second half but only to the parent
 				free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
 				if (!free_idx) {
 					BPF_DEBUG("free index error. return\n");
@@ -291,9 +297,18 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				__u32 median_idx = NODE_ORDER / 2;
 				BPF_DEBUG("median node has index %d\n", median_idx);
 
-				BPF_DEBUG("pushing 2nd nod half to the new node	\n");
+				BPF_DEBUG("pushing to the new node\n");
 				int j=0;
-				for (i=median_idx, j=0; i<NODE_ORDER-1; i++, j++) {
+				int starting_idx = 0;
+				if (kk==0) { //we need to split a leaf
+					starting_idx = median_idx;	
+				} else {
+					//split a non leaf. the median node is pushed only to the parent
+					starting_idx = median_idx+1;
+					key =  node->entry[median_idx].key;
+					node->entry[median_idx].key = 0;	
+				}
+				for (i=starting_idx, j=0; i<NODE_ORDER-1; i++, j++) {
 					BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
 					free_node->entry[j].key = node->entry[i].key;
 					free_node->entry[j].pointer = node->entry[i].pointer;	
@@ -313,7 +328,9 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					free_node->entry[j+1].pointer = right_child;
 				}
 				nodes_traversed_count --;
-				key = free_node->entry[0].key; //the median that has to be inserted in the parent
+				if (kk==0) {
+					key = free_node->entry[0].key; //the first key of the new node has to be inserted in the parent
+				}
 				left_child = node_index;
 				right_child = new_node_idx; 
 
@@ -348,8 +365,13 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					
 					if (right_child) {
 						BPF_DEBUG("update right child. num of keys %d, right child %d\n", num_of_keys_in_node, right_child);
-						if (insertion_idx +1 < NODE_ORDER-1) {
+						if (insertion_idx+1 < NODE_ORDER-1) {
 							node->entry[insertion_idx+1].pointer = right_child;
+						}
+						else if (insertion_idx == NODE_ORDER-2){
+							node->entry[NODE_ORDER-1].pointer = right_child;
+						} else {
+							BPF_DEBUG("something wrond with the right child... XXX CHECK THIS\n");
 						}
 					}
 				 } else {	
@@ -358,12 +380,14 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					for (i=NODE_ORDER-3; i >= 0; i--) {
 						if (node->entry[i].key == 0) {
 							BPF_DEBUG("entry %d empty\n", i);
-							continue;
+							if (node->entry[i].pointer == 0) {
+								continue;
+							}
 						}
 						node->entry[i+1].key = node->entry[i].key;
 						node->entry[i+1].pointer = node->entry[i].pointer;
 						if (i == insertion_idx) {
-							BPF_DEBUG("insertion index reached %d. break\n", i);
+							BPF_DEBUG("insertion index reached %d\n", i);
 							break;
 						}
 					} 
