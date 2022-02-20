@@ -215,6 +215,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			node = bpf_map_lookup_elem(&index_map, &(node_index));
 			BPF_DEBUG("recursive insertion loop. node_idx %d left_child %d right child %d\n", 
 									node_index, left_child, right_child);
+			BPF_DEBUG("insert key %d\n", key);
 			if (!node) {
 				BPF_DEBUG("error in reading the node in the traversed node stack\n");
 				return 0;
@@ -227,12 +228,14 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the node is full
 				//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
 				struct bplus_node_entry extra_node_entry = {};
+				__u32 last_pointer = 0;
 
 				BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
+				insertion_idx = 0;
 				for (i=0; i<NODE_ORDER-1; i++) {
 					if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
 						insertion_idx = i;
-						BPF_DEBUG("key %d must be stored in index %d\n", key, insertion_idx);
+						BPF_DEBUG("key %d must be stored in index %d (current val = %d)\n", key, insertion_idx, node->entry[i].key);
 						break;
 					}
 				}
@@ -249,13 +252,19 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					BPF_DEBUG("key %d must be stored inside the node.\n", key);
 					BPF_DEBUG("temporarily storing the last key already in %d\n", node->entry[NODE_ORDER-2].key);
 					extra_node_entry.key = node->entry[NODE_ORDER-2].key;
-					if (right_child==0) {
+					
+					//XXX OCCHIO
+					//if (right_child==0) {
 						extra_node_entry.pointer = node->entry[NODE_ORDER-2].pointer;
-					} else {
-						extra_node_entry.pointer = right_child;
+					//} else {
+					//	extra_node_entry.pointer = right_child;
+					//}
+					if (kk!=0) {
+						last_pointer = node->entry[NODE_ORDER-1].pointer;	
 					}
 
 					BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
+					
 					for (i=NODE_ORDER-2; i >= 0; i--) {
 						BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
 						node->entry[i+1].key = node->entry[i].key;
@@ -266,11 +275,15 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 						}
 					}
 					node->entry[insertion_idx].key = key;
+					if (right_child) {
+						node->entry[insertion_idx+1].pointer = right_child;
+					}
 					if (left_child == 0) {
 						node->entry[insertion_idx].pointer = free_data_index;
 					} else {
 						node->entry[insertion_idx].pointer = left_child;
 					}
+					
 				}
 	 
 
@@ -325,8 +338,14 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				free_node->entry[j].key = extra_node_entry.key;
 				free_node->entry[j].pointer = extra_node_entry.pointer;
 				free_node->entry[NODE_ORDER-1].key = j+1;
-				node->entry[NODE_ORDER-1].key = num_of_keys_in_node - j;
+
+				//XXX OCCHIO
+				if (last_pointer) {
+					free_node->entry[j+1].pointer = last_pointer; 
+				}
 				node->entry[NODE_ORDER-1].pointer = *free_idx;
+				//readjusting the number of keys in the splitted node
+				node->entry[NODE_ORDER-1].key = NODE_ORDER/2;
 
 				if ((insertion_idx == 0) && (right_child))  {  
 					//the insert key was temporarily stored outside the node
@@ -382,14 +401,16 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				 } else {	
 
 					BPF_DEBUG("readjusting the node before inserting the new key ...\n");
-					for (i=NODE_ORDER-3; i >= 0; i--) {
+					for (i=NODE_ORDER-2; i >= 0; i--) {
 						if (node->entry[i].key == 0) {
 							BPF_DEBUG("entry %d empty\n", i);
 							if (node->entry[i].pointer == 0) {
 								continue;
 							}
 						}
-						node->entry[i+1].key = node->entry[i].key;
+						if (i!=NODE_ORDER-2) { 
+							node->entry[i+1].key = node->entry[i].key;
+						}
 						node->entry[i+1].pointer = node->entry[i].pointer;
 						if (i == insertion_idx) {
 							BPF_DEBUG("insertion index reached %d\n", i);

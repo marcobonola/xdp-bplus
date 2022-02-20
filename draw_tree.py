@@ -66,15 +66,17 @@ if __name__ == "__main__":
         entries = ""
 
         fields_string = ""
-        for i in range(NODE_ORDER*2-1):
+        for i in range(NODE_ORDER*2):
             field = "<f{}>{}"
             if (i % 2) == 0: #is odd
                 label = "" 
             else:
                 label = node[i] if node[i]!=0 else "" 
+                if i == NODE_ORDER*2-1:
+                    label = "id {}, # {}".format(node_idx, label)
 
             fields_string += field.format(i, label)
-            if i < NODE_ORDER*2 - 2:
+            if i < NODE_ORDER*2 - 1:
                 fields_string += "|"
         
         g.node(name, nohtml(fields_string))
