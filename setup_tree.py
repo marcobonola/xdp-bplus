@@ -46,7 +46,7 @@ if __name__ == "__main__":
     
     print("loading free idx... it may take a long time...")
     free_idx = []
-    for i in reversed(range(2, 20)):
+    for i in reversed(range(2, 40)):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):
@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
         free_idx.append(stri)
     
-    for i in range(0, 20-2):
+    for i in range(0, 40-2):
         a = i.to_bytes(4, "little")
         stri = ""
         for j in range(4):

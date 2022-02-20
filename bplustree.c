@@ -30,7 +30,7 @@
 
 #define NODE_ORDER 4 			//must be hardcoded
 #define MAX_TREE_HEIGHT 8 		//must be hardcoded
-#define INDEX_MAP_SIZE 32		//must be hardcoded
+#define INDEX_MAP_SIZE 64		//must be hardcoded
 
 struct bplus_tree_info {
 	__u32 curr_root;		//initialized to 1
