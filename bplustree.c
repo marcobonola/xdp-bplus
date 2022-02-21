@@ -120,14 +120,14 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			return 0;
 		}
 		
-		BPF_DEBUG("searching in node %d\n", node_index);
-		BPF_DEBUG("storing node idx %d in stack position %d\n", node_index, i+1);
+		//BPF_DEBUG("searching in node %d\n", node_index);
+		//BPF_DEBUG("storing node idx %d in stack position %d\n", node_index, i+1);
 		nodes_traversed[i+1] = node_index;
 		nodes_traversed_count++;
 
 		if (node->entry[NODE_ORDER-1].key == 0) {
 			//node is empty
-			BPF_DEBUG("the node is empty\n");
+			//BPF_DEBUG("the node is empty\n");
 			break;
 		}
 		if (is_leaf == 0) {
@@ -135,10 +135,10 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			for (j=0; j<NODE_ORDER-1; j++) {
 				//for now we implement a linear search in the node
 				//TODO binry search ?
-				BPF_DEBUG("j %d node key %d\n", j, node->entry[j].key);
+				//BPF_DEBUG("j %d node key %d\n", j, node->entry[j].key);
 				if (key < node->entry[j].key) {
 					node_index = node->entry[j].pointer;
-					BPF_DEBUG("LESS. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
+					//BPF_DEBUG("LESS. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
 					break;
 				} else {
 					//(search key == curr key) or
@@ -146,19 +146,19 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					//(search key > curr_key) and (curr key == last key)
 					  ( (node->entry[j].key == 0))) { 
 						node_index = node->entry[j].pointer;
-						BPF_DEBUG("EQUAL or EMPTY RECORD. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
+						//BPF_DEBUG("EQUAL or EMPTY RECORD. search key %d, key %d, go to node %d\n", key, node->entry[j].key, node_index);
 						break;	
 					}
 				}
 			}
 			if (j==NODE_ORDER-1) {
-				BPF_DEBUG("LAST RECORD. take the last pointer: node_index %d\n", node_index);	
+				//BPF_DEBUG("LAST RECORD. take the last pointer: node_index %d\n", node_index);	
 				node_index = node->entry[NODE_ORDER-1].pointer;
 			}
 		}
 		else {
 			//leaf node
-			BPF_DEBUG("the node is a leaf\n");
+			//BPF_DEBUG("the node is a leaf\n");
 			if (cmd == OP_SEARCH) {
 				//exact match of the search key in the leaf node
 				for (j=0; j<NODE_ORDER-2; j++) {
@@ -172,7 +172,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		
 
 		if (is_leaf) {
-			BPF_DEBUG("leaf node. breaking the external loop\n");
+			//BPF_DEBUG("leaf node. breaking the external loop\n");
 		        break;
 		}	       
 	}
@@ -227,7 +227,6 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			}
 			if (num_of_keys_in_node == (NODE_ORDER - 1)) { //the node is full
 				//TODO do I need an extra entry? Maybe I can use the last one, it is rewritten anyway...
-				struct bplus_node_entry extra_node_entry = {};
 				__u32 last_pointer = 0;
 
 				BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
@@ -239,32 +238,21 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 						break;
 					}
 				}
-				if(!insertion_idx) {
-					BPF_DEBUG("key %d must be stored outside the node.\n", key);
-					BPF_DEBUG("temporarily storing the current key\n");
-					extra_node_entry.key = key;
-					if (left_child == 0) { 
-						extra_node_entry.pointer = free_data_index;
-					} else {
-						extra_node_entry.pointer = left_child;	
-					}
-				} else {
-					BPF_DEBUG("key %d must be stored inside the node.\n", key);
-					BPF_DEBUG("temporarily storing the last key already in %d\n", node->entry[NODE_ORDER-2].key);
-					extra_node_entry.key = node->entry[NODE_ORDER-2].key;
-					
-					//XXX OCCHIO
-					//if (right_child==0) {
-						extra_node_entry.pointer = node->entry[NODE_ORDER-2].pointer;
-					//} else {
-					//	extra_node_entry.pointer = right_child;
-					//}
-					if (kk!=0) {
-						last_pointer = node->entry[NODE_ORDER-1].pointer;	
-					}
 
-					BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
-					
+				if (!insertion_idx) {
+					insertion_idx = NODE_ORDER-1;
+					if (kk) { //this is not a leaf
+						last_pointer = right_child;
+					}
+					BPF_DEBUG("key %d must be stored in index %d, last entry\n", key, i);
+				} else if (kk != 0) {
+					//we need to store the last pointer
+					last_pointer = node->entry[NODE_ORDER-1].pointer;
+				}
+
+
+				BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
+				if (insertion_idx != NODE_ORDER -1) {
 					for (i=NODE_ORDER-2; i >= 0; i--) {
 						BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
 						node->entry[i+1].key = node->entry[i].key;
@@ -274,20 +262,15 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 							break;
 						}
 					}
-					node->entry[insertion_idx].key = key;
-					if (right_child) {
-						node->entry[insertion_idx+1].pointer = right_child;
-					}
-					if (left_child == 0) {
-						node->entry[insertion_idx].pointer = free_data_index;
-					} else {
-						node->entry[insertion_idx].pointer = left_child;
-					}
-					
 				}
-	 
+				node->entry[insertion_idx].key = key;
+				if (kk != 0){
+					node->entry[insertion_idx].pointer = left_child;
+				} else {
+					node->entry[insertion_idx].pointer = free_data_index;
+				}
 
-				//TODO split!!
+				//split!!
 				//if the node to split is a leaf we simply divide the node in two, push second half in the new node, push median upward
 				//if the node is not a leaf the median is not pushed in the second half but only to the parent
 				free_idx = bpf_map_lookup_elem(&free_index_list, &info->free_indexes_tail);
@@ -318,52 +301,65 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("pushing to the new node\n");
 				int j=0;
 				int starting_idx = 0;
-				int median_only_to_parent = 0;
 
 				if (kk==0) { //we need to split a leaf
 					starting_idx = median_idx;	
+					BPF_DEBUG("LEAF: starting index %d\n", starting_idx);
 				} else {
 					//split a non leaf. the median node is pushed only to the parent
+					key = node->entry[median_idx].key;
 					starting_idx = median_idx+1;
-					key =  node->entry[median_idx].key;
-					node->entry[median_idx].key = 0;	
-					median_only_to_parent = 1;
+					node->entry[median_idx].key = 0;
+					BPF_DEBUG("NON-LEAF: starting index %d\n", starting_idx);
 				}
 				for (i=starting_idx, j=0; i<NODE_ORDER-1; i++, j++) {
+					BPF_DEBUG("i %d j %d\n", i, j);
 					BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
 					free_node->entry[j].key = node->entry[i].key;
-					free_node->entry[j].pointer = node->entry[i].pointer;	
+					BPF_DEBUG("pushing pointer idx %d value %d to the new node index %d\n", i, node->entry[i].pointer, j);
+					free_node->entry[j].pointer = node->entry[i].pointer;
 					node->entry[i].key = 0;
-					node->entry[i].pointer=0;
+					if (i!=starting_idx && kk == 0) {
+						node->entry[i].pointer = 0;
+					}
+
 				}
 
-				BPF_DEBUG("pushing extra key %d to the new node index %d\n", extra_node_entry.key, j);
-				free_node->entry[j].key = extra_node_entry.key;
-				//XXX 
-				//if (!median_only_to_parent) {
-					free_node->entry[j].pointer = extra_node_entry.pointer;
-				//} else {
-				//	free_node->entry[0].pointer = right_child;
-				//}
 
-				//free_node->entry[j].pointer = right_child;
+				BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
+				free_node->entry[j].key = node->entry[i].key;
+				BPF_DEBUG("pushing pointer idx %d value %d to the new node index %d\n", i, node->entry[i].pointer, j);
+				free_node->entry[j].pointer = node->entry[i].pointer;
+
+				BPF_DEBUG("setting key in node %d idx %d to 0\n", node_index, i);
+				node->entry[i].key = 0;
+				//node->entry[NODE_ORDER-1].pointer = 0;
+				BPF_DEBUG("setting pointer in node %d idx %d to 0\n", node_index, i);
+				node->entry[i].pointer = 0; 
+				
+				if (kk!=0) { //this is not a leaf 
+					BPF_DEBUG("setting last pointer in new node index %d to last_pointer %d\n", j+1, last_pointer);
+					free_node->entry[j+1].pointer = last_pointer;
+					//node->entry[i].pointer=free_node->entry[0].pointer;
+				}
+	
+				//readjusting the number of keys in the splitted node
 				free_node->entry[NODE_ORDER-1].key = j+1;
+				node->entry[NODE_ORDER-1].key = NODE_ORDER/2;
 
 				if (last_pointer) {
 					free_node->entry[j+1].pointer = last_pointer; 
 				}
-				node->entry[NODE_ORDER-1].pointer = *free_idx;
-				//readjusting the number of keys in the splitted node
-				node->entry[NODE_ORDER-1].key = NODE_ORDER/2;
 
-				if ((insertion_idx == 0) && (right_child))  {  
-					//the insert key was temporarily stored outside the node
-					free_node->entry[j+1].pointer = right_child;
+				if (kk==0) {
+					free_node->entry[NODE_ORDER-1].pointer = node->entry[NODE_ORDER-1].pointer;
+					node->entry[NODE_ORDER-1].pointer = *free_idx;
 				}
 				nodes_traversed_count --;
 				if (kk==0) {
 					key = free_node->entry[0].key; //the first key of the new node has to be inserted in the parent
 				}
+
 				left_child = node_index;
 				right_child = new_node_idx; 
 
@@ -371,6 +367,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					need_a_new_root = 1;
 					break;
 				}
+
 			} else {
 				//
 				BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
