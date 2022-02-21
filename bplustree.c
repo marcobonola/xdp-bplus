@@ -318,6 +318,8 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("pushing to the new node\n");
 				int j=0;
 				int starting_idx = 0;
+				int median_only_to_parent = 0;
+
 				if (kk==0) { //we need to split a leaf
 					starting_idx = median_idx;	
 				} else {
@@ -325,6 +327,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					starting_idx = median_idx+1;
 					key =  node->entry[median_idx].key;
 					node->entry[median_idx].key = 0;	
+					median_only_to_parent = 1;
 				}
 				for (i=starting_idx, j=0; i<NODE_ORDER-1; i++, j++) {
 					BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
@@ -336,10 +339,16 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 
 				BPF_DEBUG("pushing extra key %d to the new node index %d\n", extra_node_entry.key, j);
 				free_node->entry[j].key = extra_node_entry.key;
-				free_node->entry[j].pointer = extra_node_entry.pointer;
+				//XXX 
+				//if (!median_only_to_parent) {
+					free_node->entry[j].pointer = extra_node_entry.pointer;
+				//} else {
+				//	free_node->entry[0].pointer = right_child;
+				//}
+
+				//free_node->entry[j].pointer = right_child;
 				free_node->entry[NODE_ORDER-1].key = j+1;
 
-				//XXX OCCHIO
 				if (last_pointer) {
 					free_node->entry[j+1].pointer = last_pointer; 
 				}
