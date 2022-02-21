@@ -266,6 +266,9 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				node->entry[insertion_idx].key = key;
 				if (kk != 0){
 					node->entry[insertion_idx].pointer = left_child;
+					if (insertion_idx < NODE_ORDER-1) {
+						node->entry[insertion_idx+1].pointer = right_child;
+					}
 				} else {
 					node->entry[insertion_idx].pointer = free_data_index;
 				}
