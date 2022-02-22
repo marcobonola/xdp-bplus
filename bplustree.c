@@ -13,7 +13,7 @@
 
 //sudo cat /sys/kernel/debug/tracing/trace_pipe
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define bpf_printk(fmt, ...)				\
 		({						\
@@ -110,6 +110,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		return 0;
 	}
 	
+#pragma unroll
 	for (i=0; i<MAX_TREE_HEIGHT; i++) {
 		if (i==info->curr_h-1){
 			is_leaf = 1;
@@ -132,6 +133,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		}
 		if (is_leaf == 0) {
 			BPF_DEBUG("the node is not a leaf\n");
+#pragma unroll
 			for (j=0; j<NODE_ORDER-1; j++) {
 				//for now we implement a linear search in the node
 				//TODO binry search ?
@@ -161,6 +163,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			//BPF_DEBUG("the node is a leaf\n");
 			if (cmd == OP_SEARCH) {
 				//exact match of the search key in the leaf node
+#pragma unroll
 				for (j=0; j<NODE_ORDER-2; j++) {
 					if (key == node->entry[j].key) {
 						data_pointer = node->entry[j].pointer;
@@ -210,6 +213,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 
 		BPF_DEBUG("initial nodes traversed count %d\n", initial_nodes_traversed_count);
 
+#pragma unroll
 		for (kk=0; kk<MAX_TREE_HEIGHT; kk++) {
 			node_index = nodes_traversed[initial_nodes_traversed_count-kk];
 			node = bpf_map_lookup_elem(&index_map, &(node_index));
@@ -231,6 +235,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 
 				BPF_DEBUG("the node is full. finding the index where the new key should be stored\n");
 				insertion_idx = 0;
+#pragma unroll
 				for (i=0; i<NODE_ORDER-1; i++) {
 					if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
 						insertion_idx = i;
@@ -253,6 +258,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 
 				BPF_DEBUG("readjusting the node before inserting the new key in index %d ...\n", insertion_idx);
 				if (insertion_idx != NODE_ORDER -1) {
+#pragma unroll
 					for (i=NODE_ORDER-2; i >= 0; i--) {
 						BPF_DEBUG("pushing forward key %d at index %d\n",  node->entry[i].key, i); 
 						node->entry[i+1].key = node->entry[i].key;
@@ -315,6 +321,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 					node->entry[median_idx].key = 0;
 					BPF_DEBUG("NON-LEAF: starting index %d\n", starting_idx);
 				}
+#pragma unroll
 				for (i=starting_idx, j=0; i<NODE_ORDER-1; i++, j++) {
 					BPF_DEBUG("i %d j %d\n", i, j);
 					BPF_DEBUG("pushing key idx %d value %d to the new node index %d\n", i, node->entry[i].key, j);
@@ -376,6 +383,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				BPF_DEBUG("the node is not full. There are %d keys. ORDERED INSERTION!\n", num_of_keys_in_node);
 				
 				BPF_DEBUG("finding the index where the new key should be stored\n");
+#pragma unroll
 				for (i=0; i<NODE_ORDER; i++) {
 					if ((node->entry[i].key == 0) || (key < node->entry[i].key)) {
 						insertion_idx = i;
@@ -410,6 +418,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				 } else {	
 
 					BPF_DEBUG("readjusting the node before inserting the new key ...\n");
+#pragma unroll
 					for (i=NODE_ORDER-2; i >= 0; i--) {
 						if (node->entry[i].key == 0) {
 							BPF_DEBUG("entry %d empty\n", i);
