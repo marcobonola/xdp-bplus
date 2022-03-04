@@ -22,7 +22,7 @@
 		##__VA_ARGS__);					\
 		})
 	
-#ifdef DEBUG
+#if DEBUG
 #define BPF_DEBUG(str, ...) bpf_printk(str, ##__VA_ARGS__)
 #else
 #define BPF_DEBUG(str, ...) do { } while(0)
@@ -131,8 +131,12 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 			//BPF_DEBUG("the node is empty\n");
 			break;
 		}
-		if (is_leaf == 0) {
+		//if (is_leaf == 0) {
 			BPF_DEBUG("the node is not a leaf\n");
+
+			if (is_leaf) {
+			       break;
+			}       
 #pragma unroll
 			for (j=0; j<NODE_ORDER-1; j++) {
 				//for now we implement a linear search in the node
@@ -158,6 +162,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				node_index = node->entry[NODE_ORDER-1].pointer;
 			}
 		}
+	/*
 		else {
 			//leaf node
 			//BPF_DEBUG("the node is a leaf\n");
@@ -172,13 +177,13 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 				}	
 			}
 		}
-		
 
 		if (is_leaf) {
 			//BPF_DEBUG("leaf node. breaking the external loop\n");
 		        break;
 		}	       
 	}
+	*/
 
 	//"node" is the leaf node in which we search/insert/delete the key
 	//if data_pointer != 0 it means we actually found the key. 
@@ -199,7 +204,7 @@ static inline __u64 __bplus_process(__u32 cmd, __u64 key, __u8 *data, int len) {
 		__u32 left_child=0, right_child=0;
 
 		if (data_pointer) {
-			bpf_printk("key already in. doing nothing ...\n");
+			BPF_DEBUG("key already in. doing nothing ...\n");
 			return data_pointer;
 		}
 
